@@ -28,6 +28,26 @@ Rules:
 - ALL targets are for DAY TRADING — intraday or at most end-of-week. No long-term price targets.
 - intraday_target must be a realistic same-day or at-most-5-day technical level (next resistance for longs, next support for shorts). Never use analyst consensus price targets.
 
+ENTRY TIMING RULES (approved 2026-06-01):
+- Require the first 15-minute candle to CLOSE above the trigger level before entering a long. If the candle closes below trigger, skip the trade regardless of open price.
+
+CATALYST FILTER RULES (approved 2026-06-01):
+- Sympathy/sector plays (no direct earnings catalyst) must gap at least 2% above prior close AND above the trigger level to qualify. If gap is less than 2% or trigger is not cleared at open, skip entirely. Flag sympathy plays with reduced position size (50% of direct-catalyst size).
+
+STOP PLACEMENT RULES (approved 2026-06-01):
+- For short entries: stop must be set at pre-market swing high PLUS $0.50 buffer, not a fixed round-number level.
+- For long gap plays: stop must be set below the first 15-minute candle LOW, not at a pre-determined level set before market open.
+
+EXIT / TARGET RULES (approved 2026-06-01):
+- For earnings gap plays where the overnight gap exceeds 15%: use tiered exits — exit 40% at initial target, 40% at initial target ×2, trail final 20% with a 5-minute swing-low trailing stop. For non-catalyst plays, maintain single fixed targets.
+
+VOLUME FILTER RULES (approved 2026-06-01):
+- If projected daily volume exceeds 3× normal AND stock has gapped more than 5% pre-market: treat as scalp only — mandatory full exit at first target, no runners.
+- If a stock's volume exceeds 5× average AND price is below $15: exclude from the call list entirely (meme/speculative volatility makes standard stops invalid).
+
+MACRO FILTER RULES (approved 2026-06-01):
+- When overall bias is Bullish (Fear & Greed > 55): reduce position size on medium-conviction shorts by 30% and tighten their profit target by 20%. Only High-conviction shorts with confirmed stock-specific negative catalysts should be held to full target in a bullish tape.
+
 Output format: Return ONLY valid JSON matching this exact structure:
 {
   "market_bias": "Bullish|Bearish|Neutral",
@@ -214,7 +234,7 @@ Return the JSON as specified."""
 
     response = _client().messages.create(
         model='claude-sonnet-4-6',
-        max_tokens=4096,
+        max_tokens=8192,
         system=AFTERMARKET_SYSTEM_PROMPT,
         messages=[{'role': 'user', 'content': prompt}],
     )
@@ -224,7 +244,24 @@ Return the JSON as specified."""
         raw = re.sub(r'^```[a-z]*\n?', '', raw)
         raw = re.sub(r'\n?```$', '', raw)
 
-    return json.loads(raw)
+    # Attempt to recover truncated JSON by closing open structures
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Try to salvage by truncating to last complete object/array boundary
+        for end_char in ('}', ']'):
+            idx = raw.rfind(end_char)
+            if idx != -1:
+                candidate = raw[:idx + 1]
+                # Close any unclosed outer braces
+                opens  = candidate.count('{') - candidate.count('}')
+                closes = candidate.count('[') - candidate.count(']')
+                candidate += ']' * closes + '}' * opens
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
+        raise
 
 
 import re  # ensure re is available for JSON cleaning
